@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ledger — Admin</title>
+<style>
+  body{ font-family: system-ui, sans-serif; background:#18130F; color:#F5EEE1; max-width:720px; margin:0 auto; padding:20px; }
+  h1{ font-size:20px; }
+  .card{ background:#F5EEE1; color:#18130F; border-radius:12px; padding:16px; margin-bottom:14px; }
+  .row{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .muted{ color:#6b6b6b; font-size:13px; }
+  button{ font-family:inherit; font-weight:600; border:none; border-radius:8px; padding:8px 14px; cursor:pointer; }
+  .pay{ background:#6E8F72; color:white; }
+  .reject{ background:#8C4A3A; color:white; margin-left:8px; }
+  input{ font-family:inherit; padding:8px; border-radius:8px; border:1px solid #ccc; width:100%; box-sizing:border-box; }
+  .banner{ background:#8C4A3A; padding:12px; border-radius:8px; margin-bottom:14px; display:none; }
+  .banner.show{ display:block; }
+  #login{ text-align:center; margin-top:80px; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>Ledger Admin</h1>
+  <input id="pwInput" type="password" placeholder="Admin password" />
+  <br><br>
+  <button class="pay" onclick="login()">Enter</button>
+</div>
+
+<div id="dashboard" style="display:none">
+  <h1>Redemptions to review</h1>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="muted">Total ad/sponsor revenue recorded</div>
+        <div id="revenueDisplay" style="font-size:22px;font-weight:700;">— ETB</div>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <input id="revenueInput" placeholder="Update ETB" style="width:120px" />
+        <button class="pay" onclick="updateRevenue()">Save</button>
+      </div>
+    </div>
+    <div class="muted">Pending payouts owed: <span id="pendingOwed">—</span> pts</div>
+  </div>
+
+  <div id="warningBanner" class="banner">
+    ⚠️ Pending payouts may exceed recorded revenue. Double check before approving more.
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<script>
+let PASSWORD = "";
+
+function login() {
+  PASSWORD = document.getElementById('pwInput').value;
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  loadAll();
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", "X-Admin-Password": PASSWORD, ...(opts.headers||{}) }
+  });
+  if (!res.ok) { alert((await res.json()).error || res.statusText); throw new Error('failed'); }
+  return res.json();
+}
+
+async function loadAll() {
+  const revenue = await api('/api/admin/revenue');
+  document.getElementById('revenueDisplay').textContent = revenue.totalRevenueEtb + ' ETB';
+  document.getElementById('pendingOwed').textContent = revenue.pendingPointsOwed;
+  document.getElementById('warningBanner').classList.toggle('show', revenue.pendingPointsOwed > revenue.totalRevenueEtb);
+
+  const rows = await api('/api/admin/redemptions?status=pending');
+  const list = document.getElementById('list');
+  list.innerHTML = rows.length ? '' : '<p class="muted">No pending redemptions.</p>';
+  rows.forEach(r => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="row"><strong>@${r.username}</strong><span>${r.points} pts</span></div>
+      <div class="muted">${r.payout_method} · ${r.payout_account} · ${r.payout_name}</div>
+      <div class="muted">Requested ${r.created_at}</div>
+      <div style="margin-top:10px;">
+        <button class="pay" onclick="setStatus(${r.id},'paid')">Mark paid</button>
+        <button class="reject" onclick="setStatus(${r.id},'rejected')">Reject (return points)</button>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+async function setStatus(id, status) {
+  if (!confirm(`Mark this redemption as ${status}?`)) return;
+  await api(`/api/admin/redemptions/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) });
+  loadAll();
+}
+
+async function updateRevenue() {
+  const val = Number(document.getElementById('revenueInput').value);
+  if (isNaN(val) || val < 0) return alert('Enter a valid number');
+  await api('/api/admin/revenue', { method: 'POST', body: JSON.stringify({ totalRevenueEtb: val }) });
+  document.getElementById('revenueInput').value = '';
+  loadAll();
+}
+</script>
+</body>
+</html>
