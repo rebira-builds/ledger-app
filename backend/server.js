@@ -18,6 +18,7 @@ import crypto from "crypto";
 import Database from "better-sqlite3";
 
 const BOT_TOKEN = process.env.BOT_TOKEN || ""; // set this from @BotFather
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || ""; // set this yourself, keep it secret
 const PORT = process.env.PORT || 3000;
 
 const db = new Database("earnapp.db");
@@ -52,14 +53,29 @@ CREATE TABLE IF NOT EXISTS redemptions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
   points INTEGER NOT NULL,
+  payout_method TEXT,          -- e.g. 'Telebirr', 'CBE Birr', 'HelloCash'
+  payout_account TEXT,         -- phone number / account number
+  payout_name TEXT,            -- account holder name
   status TEXT NOT NULL DEFAULT 'pending', -- pending | paid | rejected
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  paid_at TEXT
 );
+
+-- Simple key/value store for admin-tracked figures, e.g. total ad revenue.
+-- You update 'total_revenue_etb' by hand whenever you check your ad network's
+-- dashboard, so the admin page can warn you before you approve more payouts
+-- than you've actually earned.
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT '0'
+);
+INSERT OR IGNORE INTO settings (key, value) VALUES ('total_revenue_etb', '0');
 `);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static("public")); // serves public/admin.html at /admin.html
 
 // ---------------------------------------------------------------------------
 // Telegram WebApp initData verification.
@@ -95,6 +111,17 @@ function requireUser(req, res, next) {
   const tgUser = verifyInitData(initData || "");
   if (!tgUser) return res.status(401).json({ error: "Could not verify Telegram user" });
   req.tgUser = tgUser;
+  next();
+}
+
+// Protects the /api/admin/* routes. This is deliberately simple (one shared
+// password) since it's just you managing payouts, not a multi-admin system.
+// Set ADMIN_PASSWORD on Render before relying on this in production.
+function requireAdmin(req, res, next) {
+  const supplied = req.headers["x-admin-password"];
+  if (!ADMIN_PASSWORD || supplied !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: "Not authorized" });
+  }
   next();
 }
 
@@ -235,6 +262,11 @@ app.get("/api/leaderboard", (req, res) => {
 const REDEEM_MINIMUM = 500;
 
 app.post("/api/redeem", requireUser, (req, res) => {
+  const { payoutMethod, payoutAccount, payoutName } = req.body;
+  if (!payoutMethod || !payoutAccount || !payoutName) {
+    return res.status(400).json({ error: "Payout method, account, and name are all required" });
+  }
+
   const user = db.prepare("SELECT points FROM users WHERE id = ?").get(req.tgUser.id);
   if (user.points < REDEEM_MINIMUM) {
     return res.status(400).json({ error: `Minimum redemption is ${REDEEM_MINIMUM} points`, have: user.points });
@@ -245,11 +277,71 @@ app.post("/api/redeem", requireUser, (req, res) => {
       "INSERT INTO transactions (user_id, type, amount, label) VALUES (?, 'redeem', ?, 'Redemption requested')"
     ).run(req.tgUser.id, -user.points);
     db.prepare(
-      "INSERT INTO redemptions (user_id, points) VALUES (?, ?)"
-    ).run(req.tgUser.id, user.points);
+      "INSERT INTO redemptions (user_id, points, payout_method, payout_account, payout_name) VALUES (?, ?, ?, ?, ?)"
+    ).run(req.tgUser.id, user.points, payoutMethod, payoutAccount, payoutName);
   });
   tx();
   res.json({ status: "pending", points: user.points });
+});
+
+// ---------------------------------------------------------------------------
+// Admin: review and manage payout requests.
+// These endpoints are for YOU, not regular users — protect ADMIN_PASSWORD
+// like any other credential. Visit /admin.html on your deployed backend URL
+// for a simple page that uses these.
+// ---------------------------------------------------------------------------
+app.get("/api/admin/redemptions", requireAdmin, (req, res) => {
+  const status = req.query.status || "pending";
+  const rows = db.prepare(
+    `SELECT r.id, r.user_id, u.username, r.points, r.payout_method, r.payout_account,
+            r.payout_name, r.status, r.created_at, r.paid_at
+     FROM redemptions r JOIN users u ON u.id = r.user_id
+     WHERE r.status = ? ORDER BY r.created_at ASC`
+  ).all(status);
+  res.json(rows);
+});
+
+app.post("/api/admin/redemptions/:id/status", requireAdmin, (req, res) => {
+  const { status } = req.body; // 'paid' | 'rejected'
+  if (!["paid", "rejected"].includes(status)) {
+    return res.status(400).json({ error: "status must be 'paid' or 'rejected'" });
+  }
+  const redemption = db.prepare("SELECT * FROM redemptions WHERE id = ?").get(req.params.id);
+  if (!redemption) return res.status(404).json({ error: "Not found" });
+
+  const tx = db.transaction(() => {
+    db.prepare(
+      "UPDATE redemptions SET status = ?, paid_at = CASE WHEN ? = 'paid' THEN datetime('now') ELSE paid_at END WHERE id = ?"
+    ).run(status, status, req.params.id);
+    // If rejected, give the points back to the user.
+    if (status === "rejected") {
+      db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(redemption.points, redemption.user_id);
+      db.prepare(
+        "INSERT INTO transactions (user_id, type, amount, label) VALUES (?, 'redeem', ?, 'Redemption rejected — points returned')"
+      ).run(redemption.user_id, redemption.points);
+    }
+  });
+  tx();
+  res.json({ status });
+});
+
+// Revenue tracking: you update this by hand from your ad network's dashboard.
+// It's a sanity check, not an automated accounting system.
+app.get("/api/admin/revenue", requireAdmin, (req, res) => {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'total_revenue_etb'").get();
+  const pendingPoints = db.prepare(
+    "SELECT COALESCE(SUM(points), 0) as total FROM redemptions WHERE status = 'pending'"
+  ).get();
+  res.json({ totalRevenueEtb: Number(row.value), pendingPointsOwed: pendingPoints.total });
+});
+
+app.post("/api/admin/revenue", requireAdmin, (req, res) => {
+  const { totalRevenueEtb } = req.body;
+  if (typeof totalRevenueEtb !== "number" || totalRevenueEtb < 0) {
+    return res.status(400).json({ error: "totalRevenueEtb must be a non-negative number" });
+  }
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'total_revenue_etb'").run(String(totalRevenueEtb));
+  res.json({ totalRevenueEtb });
 });
 
 app.listen(PORT, () => console.log(`earnapp backend listening on :${PORT}`));
