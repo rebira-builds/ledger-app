@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Ledger — earn honestly</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#18130F;
+    --parchment:#F5EEE1;
+    --parchment-dim:#EAE0CC;
+    --spice:#B85C2E;
+    --gold:#C79A44;
+    --sage:#6E8F72;
+    --rust:#8C4A3A;
+    --line: rgba(24,19,15,0.14);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--ink); color:var(--parchment);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  #app{ max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; }
+
+  header{ padding:22px 20px 16px; }
+  header .eyebrow{ font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--gold); }
+  header h1{ font-family:'Fraunces',serif; font-weight:600; font-size:28px; margin:4px 0 0; }
+
+  main{ flex:1; padding:0 20px 100px; }
+
+  .card{
+    background:var(--parchment); color:var(--ink); border-radius:18px;
+    padding:22px; margin-bottom:18px;
+  }
+  .balance-card{ background:linear-gradient(150deg,var(--spice),var(--rust)); color:var(--parchment); }
+  .balance-card .label{ font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:.06em; text-transform:uppercase; opacity:.85; }
+  .balance-card .amount{ font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:46px; margin:6px 0 2px; }
+  .balance-card .note{ font-size:13px; opacity:.85; }
+
+  h2.section{ font-family:'Fraunces',serif; font-size:19px; font-weight:600; color:var(--parchment); margin:26px 0 12px; }
+  .subnote{ font-family:'Inter',sans-serif; font-size:13px; color:rgba(245,238,225,.6); margin-top:-8px; margin-bottom:14px; }
+
+  .ledger-row{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:12px 0; border-bottom:1px dashed var(--line);
+    font-family:'IBM Plex Mono',monospace; font-size:13px;
+  }
+  .ledger-row:last-child{ border-bottom:none; }
+  .ledger-row .src{ font-family:'Inter',sans-serif; font-size:14px; color:var(--ink); }
+  .ledger-row .amt.pos{ color:var(--sage); font-weight:600; }
+  .ledger-row .amt.neg{ color:var(--rust); font-weight:600; }
+
+  .task{
+    display:flex; justify-content:space-between; align-items:center;
+    background:var(--parchment); color:var(--ink); border-radius:14px;
+    padding:16px; margin-bottom:12px;
+  }
+  .task .t-name{ font-weight:600; font-size:15px; }
+  .task .t-sub{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--sage); margin-top:2px; }
+  .btn{
+    font-family:'Inter',sans-serif; font-weight:600; font-size:14px;
+    background:var(--ink); color:var(--parchment); border:none; border-radius:10px;
+    padding:10px 16px; cursor:pointer;
+  }
+  .btn:disabled{ opacity:.4; cursor:default; }
+  .btn.ghost{ background:transparent; color:var(--ink); border:1.5px solid var(--ink); }
+
+  .lb-row{ display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--line); }
+  .lb-rank{ font-family:'IBM Plex Mono',monospace; font-weight:600; color:var(--spice); width:22px; }
+  .lb-name{ flex:1; font-weight:600; color:var(--ink); font-size:14px; }
+  .lb-pts{ font-family:'IBM Plex Mono',monospace; font-size:13px; color:var(--ink); }
+
+  .refer-box{ display:flex; gap:8px; margin-top:14px; }
+  .refer-box input{
+    flex:1; font-family:'IBM Plex Mono',monospace; font-size:12px;
+    padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--parchment-dim);
+  }
+
+  .disclosure{
+    font-family:'Inter',sans-serif; font-size:12.5px; line-height:1.5; color:rgba(245,238,225,.55);
+    border-top:1px solid rgba(245,238,225,.14); margin-top:28px; padding-top:16px;
+  }
+
+  nav{
+    position:fixed; bottom:0; left:0; right:0; max-width:480px; margin:0 auto;
+    background:var(--ink); border-top:1px solid rgba(245,238,225,.12);
+    display:flex; justify-content:space-around; padding:10px 0 calc(10px + env(safe-area-inset-bottom));
+  }
+  nav button{
+    background:none; border:none; color:rgba(245,238,225,.5); font-family:'Inter',sans-serif;
+    font-size:11px; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;
+  }
+  nav button.active{ color:var(--gold); }
+  nav button svg{ width:20px; height:20px; }
+
+  .hidden{ display:none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="eyebrow" id="tagline">Ledger</div>
+    <h1 id="pageTitle">Home</h1>
+  </header>
+
+  <main id="main"></main>
+
+  <nav>
+    <button data-page="home" class="active">🏠<span>Home</span></button>
+    <button data-page="earn">⚡<span>Earn</span></button>
+    <button data-page="top">🏆<span>Top</span></button>
+    <button data-page="refer">👥<span>Invite</span></button>
+    <button data-page="redeem">💳<span>Redeem</span></button>
+  </nav>
+</div>
+
+<script>
+const API = "https://YOUR-BACKEND.example.com"; // point this at your deployed backend
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+const initData = tg?.initData || "";
+const startParam = tg?.initDataUnsafe?.start_param || "";
+
+let state = { points: 0, username: "you", ledger: [], leaderboard: [] };
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Telegram-Init-Data": initData,
+      ...(opts.headers || {}),
+    },
+  });
+  if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+  return res.json();
+}
+
+async function boot() {
+  try {
+    const me = await api("/api/auth", { method: "POST", body: JSON.stringify({ refCode: startParam }) });
+    state.points = me.points; state.username = me.username;
+  } catch (e) {
+    // Offline/demo fallback so the UI is still explorable without a backend running.
+    state.points = 0; state.username = "demo";
+  }
+  render("home");
+}
+
+function fmt(n){ return n.toLocaleString(); }
+
+const pages = {
+  home: async () => {
+    let ledger = [];
+    try { ledger = await api("/api/ledger"); } catch {}
+    return `
+      <div class="card balance-card">
+        <div class="label">Your balance</div>
+        <div class="amount">${fmt(state.points)}</div>
+        <div class="note">1 point ≈ backed by real ad/sponsor revenue. No point exists that isn't paid for.</div>
+      </div>
+
+      <h2 class="section">Open ledger</h2>
+      <div class="subnote">Every entry below is real — where it says it came from is where it came from.</div>
+      <div class="card">
+        ${ledger.length ? ledger.map(row => `
+          <div class="ledger-row">
+            <span class="src">${row.label}</span>
+            <span class="amt ${row.amount >= 0 ? 'pos' : 'neg'}">${row.amount >= 0 ? '+' : ''}${row.amount}</span>
+          </div>`).join('') : `<div class="ledger-row"><span class="src">No activity yet — try the Earn tab.</span></div>`}
+      </div>
+
+      <div class="disclosure">
+        How this works: points come from ads you choose to watch and sponsor tasks
+        you complete. Redemptions are reviewed and paid out from that same revenue —
+        never from other users' activity. See the Redeem tab for the current minimum.
+      </div>
+    `;
+  },
+
+  earn: async () => `
+    <h2 class="section">Watch &amp; earn</h2>
+    <div class="subnote">Real rewarded ad. Points post after the ad actually finishes.</div>
+    <div class="task">
+      <div>
+        <div class="t-name">Watch a short ad</div>
+        <div class="t-sub">+5 pts · ~30s cooldown between views</div>
+      </div>
+      <button class="btn" id="watchAdBtn">Watch</button>
+    </div>
+
+    <h2 class="section">Sponsor tasks</h2>
+    <div class="subnote">One-time tasks, verified — not just a click you self-report.</div>
+    <div class="task">
+      <div>
+        <div class="t-name">Join @demo_channel</div>
+        <div class="t-sub">+15 pts · one time</div>
+      </div>
+      <button class="btn ghost" id="taskBtn">Join &amp; verify</button>
+    </div>
+  `,
+
+  top: async () => {
+    let lb = [];
+    try { lb = await api("/api/leaderboard"); } catch {}
+    return `
+      <h2 class="section">Leaderboard</h2>
+      <div class="subnote">Live, unedited — pulled straight from real balances.</div>
+      <div class="card">
+        ${lb.length ? lb.map((row, i) => `
+          <div class="lb-row">
+            <span class="lb-rank">#${i + 1}</span>
+            <span class="lb-name">${row.username}</span>
+            <span class="lb-pts">${fmt(row.points)} pts</span>
+          </div>`).join('') : `<div class="ledger-row"><span class="src">No one on the board yet — be first.</span></div>`}
+      </div>
+    `;
+  },
+
+  refer: async () => {
+    const link = `https://t.me/YourBotName/app?startapp=ref_${tg?.initDataUnsafe?.user?.id || '0'}`;
+    return `
+      <h2 class="section">Invite a friend</h2>
+      <div class="subnote">You get +20 pts once they actually open the app — not just for sending the link.</div>
+      <div class="card">
+        <div class="refer-box">
+          <input readonly value="${link}" id="refLink" />
+          <button class="btn" id="copyRefBtn">Copy</button>
+        </div>
+      </div>
+      <div class="disclosure">
+        This bonus is funded by the ad revenue your friend's own activity generates
+        over time — it isn't paid out of other users' balances.
+      </div>
+    `;
+  },
+
+  redeem: async () => `
+    <h2 class="section">Redeem</h2>
+    <div class="subnote">Minimum 500 pts. Requests are reviewed, then paid via Telegram Stars.</div>
+    <div class="card">
+      <div class="label" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--spice);">Your balance</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:600;margin:6px 0 16px;">${fmt(state.points)} pts</div>
+      <button class="btn" id="redeemBtn" ${state.points < 500 ? 'disabled' : ''}>
+        ${state.points < 500 ? `Need ${500 - state.points} more pts` : 'Request redemption'}
+      </button>
+    </div>
+  `,
+};
+
+async function render(page) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  document.getElementById('pageTitle').textContent = { home:'Home', earn:'Earn', top:'Leaderboard', refer:'Invite', redeem:'Redeem' }[page];
+  document.getElementById('main').innerHTML = await pages[page]();
+  wireEvents(page);
+}
+
+function wireEvents(page) {
+  if (page === 'earn') {
+    document.getElementById('watchAdBtn')?.addEventListener('click', async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Loading ad…';
+      // TODO: replace with a real rewarded-ad SDK call, e.g. Adsgram's show().
+      // Only call /api/ad/complete inside that SDK's "reward" callback,
+      // never on a plain button click, or you're just faking the ad step.
+      await new Promise(r => setTimeout(r, 1200));
+      try {
+        const result = await api('/api/ad/complete', { method: 'POST' });
+        state.points = result.points;
+        tg?.HapticFeedback?.notificationOccurred('success');
+      } catch (err) { alert(err.message); }
+      render('earn');
+    });
+    document.getElementById('taskBtn')?.addEventListener('click', async () => {
+      try {
+        const result = await api('/api/task/complete', { method: 'POST', body: JSON.stringify({ taskId: 'join_demo_channel' }) });
+        state.points = result.points;
+        render('earn');
+      } catch (err) { alert(err.message); }
+    });
+  }
+  if (page === 'refer') {
+    document.getElementById('copyRefBtn')?.addEventListener('click', () => {
+      const input = document.getElementById('refLink');
+      input.select(); document.execCommand('copy');
+      tg?.HapticFeedback?.notificationOccurred('success');
+    });
+  }
+  if (page === 'redeem') {
+    document.getElementById('redeemBtn')?.addEventListener('click', async () => {
+      try {
+        const result = await api('/api/redeem', { method: 'POST' });
+        state.points = result.points;
+        alert('Redemption requested — you\'ll be paid via Telegram Stars once reviewed.');
+        render('redeem');
+      } catch (err) { alert(err.message); }
+    });
+  }
+}
+
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => render(btn.dataset.page));
+});
+
+boot();
+</script>
+</body>
+</html>
