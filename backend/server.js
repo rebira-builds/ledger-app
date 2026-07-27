@@ -215,7 +215,10 @@ app.post("/api/ad/complete", requireUser, (req, res) => {
 // trusting a client "I did it" click.
 // ---------------------------------------------------------------------------
 const SPONSOR_TASKS = {
-  join_demo_channel: { points: 15, label: "Joined @demo_channel" },
+  join_my_channel: {
+    points: 15,
+    label: "Joined @ledgerearn"
+  },
 };
 
 app.post("/api/task/complete", requireUser, (req, res) => {
