@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Ledger — earn honestly</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://sad.adsgram.ai/js/sad.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
@@ -119,9 +120,11 @@
 </div>
 
 <script>
-const API = "https://ledger-backend-k8fp.onrender.com"; // point this at your deployed backend
+const API = "https://YOUR-BACKEND.example.com"; // point this at your deployed backend
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
+
+const AdController = window.Adsgram?.init({ blockId: "39924" });
 
 const initData = tg?.initData || "";
 const startParam = tg?.initDataUnsafe?.start_param || "";
@@ -242,10 +245,31 @@ const pages = {
 
   redeem: async () => `
     <h2 class="section">Redeem</h2>
-    <div class="subnote">Minimum 500 pts. Requests are reviewed, then paid via Telegram Stars.</div>
+    <div class="subnote">Minimum 500 pts. Requests are reviewed, then paid to the account below.</div>
     <div class="card">
       <div class="label" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--spice);">Your balance</div>
       <div style="font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:600;margin:6px 0 16px;">${fmt(state.points)} pts</div>
+
+      ${state.points >= 500 ? `
+        <div style="margin-bottom:10px;">
+          <label style="font-size:13px;font-weight:600;">Payout method</label>
+          <select id="payoutMethod" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);margin-top:4px;">
+            <option value="Telebirr">Telebirr</option>
+            <option value="CBE Birr">CBE Birr</option>
+            <option value="HelloCash">HelloCash</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:13px;font-weight:600;">Account / phone number</label>
+          <input id="payoutAccount" placeholder="e.g. 09XXXXXXXX" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);margin-top:4px;box-sizing:border-box;" />
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="font-size:13px;font-weight:600;">Full name on account</label>
+          <input id="payoutName" placeholder="Full name" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);margin-top:4px;box-sizing:border-box;" />
+        </div>
+      ` : ''}
+
       <button class="btn" id="redeemBtn" ${state.points < 500 ? 'disabled' : ''}>
         ${state.points < 500 ? `Need ${500 - state.points} more pts` : 'Request redemption'}
       </button>
@@ -264,10 +288,14 @@ function wireEvents(page) {
   if (page === 'earn') {
     document.getElementById('watchAdBtn')?.addEventListener('click', async (e) => {
       e.target.disabled = true; e.target.textContent = 'Loading ad…';
-      // TODO: replace with a real rewarded-ad SDK call, e.g. Adsgram's show().
-      // Only call /api/ad/complete inside that SDK's "reward" callback,
-      // never on a plain button click, or you're just faking the ad step.
-      await new Promise(r => setTimeout(r, 1200));
+      try {
+        await AdController.show();
+      } catch (err) {
+        alert("Ad could not be shown right now. Please try again.");
+        e.target.disabled = false;
+        e.target.textContent = 'Watch';
+        return;
+      }
       try {
         const result = await api('/api/ad/complete', { method: 'POST' });
         state.points = result.points;
@@ -292,10 +320,20 @@ function wireEvents(page) {
   }
   if (page === 'redeem') {
     document.getElementById('redeemBtn')?.addEventListener('click', async () => {
+      const payoutMethod = document.getElementById('payoutMethod')?.value;
+      const payoutAccount = document.getElementById('payoutAccount')?.value.trim();
+      const payoutName = document.getElementById('payoutName')?.value.trim();
+      if (!payoutAccount || !payoutName) {
+        alert('Please fill in your account number and full name.');
+        return;
+      }
       try {
-        const result = await api('/api/redeem', { method: 'POST' });
+        const result = await api('/api/redeem', {
+          method: 'POST',
+          body: JSON.stringify({ payoutMethod, payoutAccount, payoutName }),
+        });
         state.points = result.points;
-        alert('Redemption requested — you\'ll be paid via Telegram Stars once reviewed.');
+        alert('Redemption requested — it will be reviewed and paid to the account you provided.');
         render('redeem');
       } catch (err) { alert(err.message); }
     });
