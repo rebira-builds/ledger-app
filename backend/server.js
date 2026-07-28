@@ -261,9 +261,33 @@ app.post("/api/ad/complete", requireUser, async (req, res) => {
 const SPONSOR_TASKS = {
   join_my_channel: {
     points: 15,
-    label: "Joined @ledgerearn"
+    label: "Joined @ledgerearn",
+    channel: "@ledgerearn", // bot must be an admin of this channel to check membership
   },
 };
+
+// Statuses that count as "actually a member" per Telegram's Bot API.
+// https://core.telegram.org/bots/api#chatmember
+const MEMBER_STATUSES = new Set(["creator", "administrator", "member"]);
+
+// Asks Telegram directly whether this user is in the channel — the bot must
+// be an admin there for this call to succeed. Returns true/false, or throws
+// on an unexpected API error (e.g. bad channel handle, bot not an admin).
+async function isChannelMember(channel, userId) {
+  if (!BOT_TOKEN) {
+    // Dev mode fallback only — never ship this to production.
+    return true;
+  }
+  const url = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${encodeURIComponent(channel)}&user_id=${userId}`;
+  const resp = await fetch(url);
+  const data = await resp.json();
+
+  if (!data.ok) {
+    console.error("getChatMember failed:", data.description || data);
+    return false;
+  }
+  return MEMBER_STATUSES.has(data.result.status);
+}
 
 app.post("/api/task/complete", requireUser, async (req, res) => {
   const { taskId } = req.body;
@@ -276,7 +300,17 @@ app.post("/api/task/complete", requireUser, async (req, res) => {
   );
   if (already) return res.status(409).json({ error: "Already completed" });
 
-  // TODO: real verification, e.g. bot.getChatMember(channel, userId)
+  let verified;
+  try {
+    verified = await isChannelMember(task.channel, req.tgUser.id);
+  } catch (err) {
+    console.error("Channel verification error:", err);
+    return res.status(502).json({ error: "Could not verify membership right now, try again shortly" });
+  }
+  if (!verified) {
+    return res.status(403).json({ error: `Join ${task.channel} first, then try again` });
+  }
+
   await credit(req.tgUser.id, "sponsor_task", task.points, task.label);
   const user = await get("SELECT points FROM users WHERE id = ?", [req.tgUser.id]);
   res.json({ credited: task.points, points: user.points });
